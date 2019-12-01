@@ -1,0 +1,2 @@
+run:
+	sudo ./trace.py

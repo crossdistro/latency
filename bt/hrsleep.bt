@@ -1,0 +1,60 @@
+#!/home/pavlix/src/oss/bpftrace/src/bpftrace
+
+#include "types.h"
+
+BEGIN
+{
+    $threshold_us = $1 ? $1 : 1000;
+
+    @threshold = (uint64) $threshold_us * 1000;
+}
+
+kprobe:hrtimer_nanosleep
+{
+    $now = nsecs;
+    $rqtp = (struct __kernel_timespec *) arg0;
+    $nanoseconds = (uint64) ($rqtp->tv_sec * 1000000000 + $rqtp->tv_nsec);
+    $mode = arg1;
+
+    if ($mode & 0x01) {
+        /* relative */
+        $expected = $nanoseconds
+    } else {
+        /* absolute */
+        $expected = $nanoseconds - $now;
+    }
+
+    //printf("[%s/%d] sleep %d us\n", comm, tid, $expected / 1000);
+
+    @start[tid] = $now;
+    @expected[tid] = $expected;
+    @requested_ns = hist($expected);
+}
+
+kretprobe:hrtimer_nanosleep
+/ @start[tid] != 0 /
+{
+    $start = @start[tid]; delete(@start[tid]);
+    $current = nsecs;
+
+    $expected = @expected[tid]; delete(@expected[tid]);
+    $actual = (uint64) (nsecs - $start);
+    $delay = $actual - $expected;
+
+    if ($delay <= 0 || $delay > @threshold) {
+        printf("%d %d\n", $delay < 0, $delay);
+        printf("%s/%d: ", comm, tid);
+        printf("slept %lld us, expected %lld us, delay %lld us\n",
+            $actual / 1000,
+            $expected / 1000,
+            $delay / 1000);
+    }
+
+    @delayed_ns = hist($delay)
+}
+
+END
+{
+    clear(@start);
+    clear(@expected);
+}

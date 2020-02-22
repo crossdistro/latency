@@ -1,0 +1,90 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/time.h>
+#include <linux/sched.h>
+
+/*
+ * Collect a `sched_switch` only after a `finish_task_switch` in order to
+ * always measure the running time of each process.
+ */
+tracepoint:sched:sched_switch
+/ @ts_start[cpu] /
+{
+    $start = @ts_start[cpu];
+    delete(@ts_start[cpu]);
+    $stop = nsecs;
+    @ts_stop[cpu] = $stop;
+    $type = @type[cpu];
+
+    $yield = @cond_resched_count[cpu];
+    $irqs = @hardirq_count;
+    $sirqs = @softirq_count;
+
+    if (tid) {
+        /* task */
+        @total_task_time = sum(($stop - $start) / 1000);
+        @max_task_time = max(($stop - $start) / 1000);
+    } else {
+        /* swapper */
+        @total_idle_time = sum(($stop - $start) / 1000);
+        @max_idle_time = max(($stop - $start) / 1000);
+    }
+
+    if (tid) {
+        printf("[%d] %llu [%s] ", cpu, elapsed / 1000, $type);
+        printf("%s:%d ", comm, tid);
+        printf("(y=%d h=%d s=%d)", $yield, $irqs, $sirqs);
+        printf("--> %s:%d\n", args->next_comm, args->next_pid);
+    }
+}
+kprobe:finish_task_switch
+{
+    $stop = @ts_stop[cpu];
+    delete(@ts_stop[cpu]);
+    $start = nsecs;
+    @ts_start[cpu] = $start;
+
+    delete(@cond_resched_count[cpu]);
+    delete(@hardirq_count);
+    delete(@softirq_count);
+
+    $task = (struct task_struct *)curtask;
+
+    if ($stop) {
+        @total_phantom_time = sum(($start - $stop) / 1000);
+        @max_phantom_time = max(($start - $stop) / 1000);
+    }
+
+    if (tid) {
+        if ($task->mm) {
+            $type = "task";
+        } else {
+            $type = "kthread";
+        }
+    } else {
+        $type = "swapper";
+    }
+    @type[cpu] = $type;
+
+    if (tid) {
+        printf("[%d] %llu [%s] ", cpu, elapsed / 1000, $type);
+        printf("%s:%d <--\n", comm, tid);
+    }
+}
+kprobe:_cond_resched
+{
+    @cond_resched_count[cpu] += 1;
+}
+tracepoint:irq:irq_handler_entry
+{
+    @hardirq_count += 1;
+}
+tracepoint:irq:softirq_entry
+{
+    @softirq_count += 1;
+}
+END
+{
+    clear(@ts_start);
+    clear(@type);
+}

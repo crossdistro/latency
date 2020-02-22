@@ -1,0 +1,120 @@
+#!/usr/bin/env -S bpftrace -B full
+
+/*
+ * This program is highly experimental and fragile. Start of tracing is
+ * delayed by a magic constant of half a second to avoid tracing while
+ * all the syscall probes are not loaded, yet.
+ */
+
+tracepoint:syscalls:sys_enter_*
+/ elapsed > 500000000 /
+{
+    $start = nsecs;
+
+    @in_syscall[tid] = 1;
+    @syscall[tid] = probe;
+
+    @ts[tid] = $start;
+    @ts_yield[tid] = $start;
+
+    //printf("[%d] %llu %s:%d --> [%s]\n", cpu, elapsed, comm, tid, probe);
+}
+tracepoint:raw_syscalls:sys_exit
+/ @in_syscall[tid] /
+{
+    $start = @ts[tid];
+    $now = nsecs;
+    $unsched = @unsched[tid];
+    $last = @ts_yield[tid];
+    if ($last) {
+        $lat = $now - $last;
+        @max_lat = max($lat);
+        if ($lat > @lat[tid]) {
+            @lat[tid] = $lat;
+        }
+    }
+    $lat = @lat[tid];
+    delete(@ts[tid]);
+    delete(@ts_yield[tid]);
+    delete(@unsched[tid]);
+    delete(@lat[tid]);
+
+    $syscall = @syscall[tid];
+    delete(@in_syscall[tid]);
+    delete(@syscall[tid]);
+
+    $real = $now - $start;
+    $sys = $real - $unsched;
+    @max_sys = max($sys);
+
+
+    if ($lat > 1000000) {
+        if ($lat > 1000000000) {
+            $mark = " !";
+        } else {
+            $mark = " +";
+        }
+    } else {
+        $mark = "";
+    }
+
+    printf("[%d] %llu %s:%d <-- [%s] ", cpu, elapsed, comm, tid, $syscall);
+    printf("real=%llu sys=%llu lat=%llu (microseconds)%s\n", $real/1000, $sys/1000, $lat/1000, $mark);
+}
+tracepoint:sched:sched_switch
+/ @in_syscall[tid] /
+{
+    $now = nsecs;
+    @ts_unsched[tid] = $now;
+    $syscall = @syscall[tid];
+
+    $last = @ts_yield[tid];
+    $lat = $now - $last;
+    @max_lat = max($lat);
+    delete(@ts_yield[tid]);
+
+    if ($lat > @lat[tid]) {
+        @lat[tid] = $lat;
+    }
+
+
+    printf("[%d] %llu %s:%d <== [%s] UNSCHEDULE\n", cpu, elapsed, comm, tid, $syscall);
+}
+kprobe:finish_task_switch
+/ @ts_unsched[tid] /
+{
+    $now = nsecs;
+    $unsched = $now - @ts_unsched[tid];
+    delete(@ts_unsched[tid]);
+    @ts_yield[tid] = $now;
+    $syscall = @syscall[tid];
+
+    @unsched[tid] += $unsched;
+
+    printf("[%d] %llu %s:%d ==> [%s] RESCHEDULE\n", cpu, elapsed, comm, tid, $syscall);
+}
+kprobe:_cond_resched
+/ @ts_yield[tid] /
+{
+    $last = @ts_yield[tid];
+    $now = nsecs;
+    $lat = $now - $last;
+    @max_lat = max($lat);
+    @ts_yield[tid] = $now;
+
+    if ($lat > @lat[tid]) {
+        @lat[tid] = $lat;
+    }
+
+    //printf(".");
+}
+END
+{
+    clear(@ts);
+    clear(@ts_yield);
+    clear(@ts_unsched);
+    clear(@unsched);
+    clear(@lat);
+    clear(@in_syscall);
+    clear(@syscall);
+}

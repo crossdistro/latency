@@ -1,0 +1,32 @@
+#!/usr/bin/env bpftrace
+
+/*
+ * See IRQ numbers in the interrupts table:
+ *
+ *     cat /proc/interrupts
+ *
+ */
+
+tracepoint:irq:irq_handler_entry
+{
+    if (!@ts[cpu]) {
+        @ts[cpu] = nsecs;
+
+        printf("[%d] %llu --> IRQ %d\n", cpu, elapsed / 1000, args->irq);
+    } else {
+        @nested_irqs[cpu] = count();
+        printf("[%d] %llu NESTED IRQ %d\n", cpu, elapsed / 1000, args->irq);
+        printf("%s\n", kstack);
+    }
+}
+tracepoint:irq:irq_handler_exit
+/ @ts[cpu] /
+{
+    $duration = nsecs - @ts[cpu];
+    delete(@ts[cpu]);
+
+    @hardirq_count[args->irq] = count();
+    @hardirq_maxtime = max($duration / 1000);
+
+    printf("[%d] %llu <-- IRQ %d (%llu us)\n", cpu, elapsed / 1000, args->irq, $duration / 1000);
+}

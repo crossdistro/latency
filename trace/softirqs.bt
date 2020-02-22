@@ -1,0 +1,28 @@
+#!/usr/bin/env bpftrace
+
+/*
+ * See SoftIRQ numbers here in the event format string:
+ *
+ *     cat /sys/kernel/debug/tracing/events/irq/softirq_entry/format
+ */
+
+tracepoint:irq:softirq_entry
+{
+    if (@ts[cpu]) {
+        @bugs = count();
+    }
+    @ts[cpu] = nsecs;
+
+    printf("[%d] %llu --> SoftIRQ %d\n", cpu, elapsed / 1000, args->vec);
+}
+tracepoint:irq:softirq_exit
+/ @ts[cpu] /
+{
+    $duration = nsecs - @ts[cpu];
+    delete(@ts[cpu]);
+
+    @softirq_count[args->vec] = count();
+    @softirq_maxtime = max($duration / 1000);
+
+    printf("[%d] %llu <-- SoftIRQ %d (%llu us)\n", cpu, elapsed / 1000, args->vec, $duration / 1000);
+}

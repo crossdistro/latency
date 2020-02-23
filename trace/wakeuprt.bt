@@ -1,0 +1,32 @@
+#!/usr/bin/env bpftrace
+
+
+#include <linux/time.h>
+#include <linux/sched.h>
+
+BEGIN
+{
+    @threshold = (uint64) 1000000;
+}
+kprobe:ttwu_do_wakeup
+{
+    $task = (struct task_struct *)arg1;
+
+    if ($task->rt_priority != 0) {
+        //printf("%p %d %d\n", $task, $task->pid, $task->rt_priority);
+        //printf("[%d] wakeup %s:%d\n", cpu, $task->comm, $task->pid);
+        //printf("p=%d sp=%d np=%d rp=%u\n", $task->prio, $task->static_prio, $task->normal_prio, $task->rt_priority);
+        @ts[$task->pid] = nsecs;
+        //printf("%s\n", kstack);
+    }
+}
+kprobe:finish_task_switch
+/ @ts[tid] /
+{
+    $late = nsecs - @ts[tid];
+    delete(@ts[tid]);
+
+    if ($late > @threshold) {
+        printf("[%d] switched %s:%d (%llu ms late)\n", cpu, comm, tid, $late / 1000000);
+    }
+}

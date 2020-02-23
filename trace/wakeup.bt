@@ -1,0 +1,22 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+    @threshold = (uint64) 1000000;
+}
+tracepoint:sched:sched_wakeup
+{
+    //printf("[%d] wakeup %s:%d\n", cpu, args->comm, args->pid);
+    @ts[args->pid] = nsecs;
+}
+kprobe:finish_task_switch
+/ @ts[tid] /
+{
+    $late = nsecs - @ts[tid];
+    delete(@ts[tid]);
+
+    if ($late > @threshold) {
+        printf("[%d] switched %s:%d (%llu ms late)\n", cpu, comm, tid, $late / 1000000);
+    }
+}
+

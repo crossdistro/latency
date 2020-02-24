@@ -1,0 +1,12 @@
+#!/usr/bin/env -S stap -g
+
+probe begin
+{
+    printf("Starting...\n");
+}
+
+probe kernel.function("i8042_interrupt")
+{
+    printf(".");
+    mdelay(2);
+}

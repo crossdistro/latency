@@ -34,6 +34,7 @@ stats = Stats()
 b["events"].open_perf_buffer(stats.handle_event)
 
 with contextlib.suppress(KeyboardInterrupt):
-    b.kprobe_poll()
+    while True:
+        b.kprobe_poll()
 
 print(f"{stats.min:.3f} {stats.avg:.3f} {stats.max:.3f}")

@@ -37,6 +37,18 @@ tracepoint:sched:sched_switch
         printf("--> %s:%d\n", args->next_comm, args->next_pid);
     }
 }
+kprobe:_cond_resched
+{
+    @cond_resched_count[cpu] += 1;
+}
+tracepoint:irq:irq_handler_entry
+{
+    @hardirq_count += 1;
+}
+tracepoint:irq:softirq_entry
+{
+    @softirq_count += 1;
+}
 kprobe:finish_task_switch
 {
     $stop = @ts_stop[cpu];
@@ -70,18 +82,6 @@ kprobe:finish_task_switch
         printf("[%d] %llu [%s] ", cpu, elapsed / 1000, $type);
         printf("%s:%d <--\n", comm, tid);
     }
-}
-kprobe:_cond_resched
-{
-    @cond_resched_count[cpu] += 1;
-}
-tracepoint:irq:irq_handler_entry
-{
-    @hardirq_count += 1;
-}
-tracepoint:irq:softirq_entry
-{
-    @softirq_count += 1;
 }
 END
 {

@@ -1,0 +1,41 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+    @threshold = (uint64) 1000000;
+}
+tracepoint:raw_syscalls:sys_enter
+/ elapsed > 100000000 /
+{
+    @deadline[tid] = nsecs + @threshold;
+}
+tracepoint:raw_syscalls:sys_exit
+/ @deadline[tid] /
+{
+    delete(@deadline[tid]);
+}
+profile:hz:999
+/ @deadline[tid] && nsecs > @deadline[tid] /
+{
+    $delay = nsecs - @deadline[tid] + @threshold;
+    delete(@deadline[tid]);
+
+    printf("[%d] %llu %s:%d (after %llu us late)\n", cpu, elapsed, comm, tid, $delay / 1000);
+    printf("%s\n", kstack);
+}
+tracepoint:sched:sched_switch
+/ @deadline[tid] /
+{
+    delete(@deadline[tid]);
+    @unscheduled[tid] = nsecs;
+}
+kprobe:finish_task_switch
+/ @unscheduled[tid] /
+{
+    delete(@unscheduled[tid]);
+    @deadline[tid] = nsecs + @threshold;
+}
+END
+{
+    clear(@unscheduled);
+}

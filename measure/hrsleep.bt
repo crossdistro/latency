@@ -10,6 +10,7 @@ BEGIN
 }
 
 kprobe:hrtimer_nanosleep
+/ elapsed > 100000000 /
 {
     $now = nsecs;
     $rqtp = (struct __kernel_timespec *) arg0;

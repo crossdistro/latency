@@ -1,0 +1,41 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/sched.h>
+
+BEGIN
+{
+    @threshold = (uint64) 1000000;
+}
+kprobe:finish_task_switch
+/ elapsed > 100000000 /
+{
+    $task = (struct task_struct *)curtask;
+
+    if (tid && $task->mm == 0) {
+        /* kthread */
+        @deadline[tid] = nsecs + @threshold;
+    }
+}
+tracepoint:sched:sched_switch
+/ @deadline[tid] /
+{
+    delete(@deadline[tid]);
+}
+kprobe:_cond_resched
+/ @deadline[tid] /
+{
+    @deadline[tid] = nsecs + @threshold;
+    @cond_resched_count[cpu] += 1;
+}
+profile:hz:999
+/ @deadline[tid] && nsecs > @deadline[tid] /
+{
+    $delay = nsecs - @deadline[tid] + @threshold;
+    delete(@deadline[tid]);
+
+    printf("[%d] %llu %s:%d (after %llu us)\n", cpu, elapsed, comm, tid, $delay / 1000);
+    printf("%s\n", kstack);
+}
+END
+{
+}

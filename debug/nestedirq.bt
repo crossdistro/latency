@@ -1,0 +1,15 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:irq:irq_handler_entry
+{
+    @level[cpu] += 1;
+    if (@level[cpu] > 1) {
+        /* Extremely unlikely we get interrupted here. */
+        printf("[level=%d]%s\n", @level[cpu], kstack);
+    }
+}
+tracepoint:irq:irq_handler_exit
+/ @level[cpu] /
+{
+    delete(@level[cpu]);
+}

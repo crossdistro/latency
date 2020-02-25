@@ -1,0 +1,45 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+    @threshold = (uint64) 1000000;
+}
+tracepoint:raw_syscalls:sys_enter
+/ elapsed > 100000000 /
+{
+    @ts[tid] = nsecs;
+    @sys_enter_count = count();
+}
+tracepoint:raw_syscalls:sys_exit
+/ @ts[tid] /
+{
+    $ts = @ts[tid];
+    $now = nsecs;
+    delete(@ts[tid]);
+
+    @ = hist(($now - $ts) / 1000);
+    @sys_exit_count = count();
+}
+tracepoint:sched:sched_switch
+/ @ts[tid] /
+{
+    $ts = @ts[tid];
+    $now = nsecs;
+    delete(@ts[tid]);
+    @unscheduled[tid] = $now;
+
+    @ = hist(($now - $ts) / 1000);
+    @switch_out_count = count();
+}
+kprobe:finish_task_switch
+/ @unscheduled[tid] /
+{
+    delete(@unscheduled[tid]);
+    @ts[tid] = nsecs;
+    @switch_in_count = count();
+}
+END
+{
+    clear(@ts);
+    clear(@unscheduled);
+}

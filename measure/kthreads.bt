@@ -1,0 +1,44 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/sched.h>
+
+BEGIN
+{
+    @threshold = (uint64) 1000000;
+}
+kprobe:finish_task_switch
+/ elapsed > 100000000 /
+{
+    $task = (struct task_struct *)curtask;
+
+    if (tid && $task->mm == 0) {
+        /* kthread */
+        @ts[tid] = nsecs;
+        @switch_in_count = count();
+    }
+}
+tracepoint:sched:sched_switch
+/ @ts[tid] /
+{
+    $ts = @ts[tid];
+    $now = nsecs;
+    delete(@ts[tid]);
+
+    @ = hist(($now - $now) / 1000);
+    @switch_out_count = count();
+}
+kprobe:_cond_resched
+/ @ts[tid] /
+{
+    $ts = @ts[tid];
+    $now = nsecs;
+    delete(@ts[tid]);
+    @ts[tid] = $now;
+
+    @ = hist(($now - $ts) / 1000);
+    @cond_resched_count = count();
+}
+END
+{
+    clear(@ts);
+}

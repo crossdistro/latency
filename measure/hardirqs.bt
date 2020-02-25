@@ -1,0 +1,27 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+    @irgs = 0;
+}
+tracepoint:irq:irq_handler_entry
+/ !@ts[cpu] /
+{
+    @irqs += 1;
+    @ts[cpu] = nsecs;
+
+    @entry = count();
+    @concurrent_irqs[@irqs] = count();
+}
+
+tracepoint:irq:irq_handler_exit
+/ @ts[cpu] /
+{
+    $latency = nsecs - @ts[cpu];
+    delete(@ts[cpu]);
+    @irqs -= 1;
+
+    @exit = count();
+    @latency_us = hist($latency / 1000);
+    @latency_max_us[args->irq] = max($latency / 1000);
+}

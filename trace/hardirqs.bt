@@ -9,7 +9,7 @@
 
 tracepoint:irq:irq_handler_entry
 {
-    if (!@ts[cpu]) {
+    if (@ts[cpu] == 0) {
         @ts[cpu] = nsecs;
 
         printf("[%d] %llu --> IRQ %d\n", cpu, elapsed / 1000, args->irq);

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bpftrace -B full
+#!/usr/bin/env bpftrace
 
 /*
  * This program is highly experimental and fragile. Start of tracing is

@@ -1,6 +1,11 @@
-#!/home/pavlix/src/oss/bpftrace/src/bpftrace
+#!/usr/bin/env bpftrace
 
-#include "types.h"
+//#include <linux/time_types.h>
+
+struct __kernel_timespec {
+	unsigned long long tv_sec;
+	unsigned long long tv_nsec;
+};
 
 BEGIN
 {
